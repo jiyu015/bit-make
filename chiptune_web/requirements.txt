@@ -1,6 +1,6 @@
 flask==3.0.3
 gunicorn==22.0.0
-basic-pitch==0.3.6
+basic-pitch
 numpy==1.26.4
 scipy==1.13.0
 pretty_midi==0.2.10
