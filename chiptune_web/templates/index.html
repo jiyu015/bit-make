@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎮 Chiptune Converter</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
+    }
+
+    h1 {
+      font-size: 1.6rem;
+      text-align: center;
+      margin-bottom: 6px;
+      letter-spacing: 0.02em;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 32px;
+    }
+
+    .card {
+      background: #1a1a2e;
+      border: 1px solid #2a2a4a;
+      border-radius: 12px;
+      padding: 28px;
+    }
+
+    /* アップロードゾーン */
+    .upload-zone {
+      border: 2px dashed #3a3a6a;
+      border-radius: 10px;
+      padding: 36px 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 24px;
+      position: relative;
+    }
+    .upload-zone:hover, .upload-zone.drag { border-color: #7c6fff; background: rgba(124,111,255,0.05); }
+    .upload-zone input { display: none; }
+    .upload-icon { font-size: 2.4rem; margin-bottom: 10px; display: block; }
+    .upload-text { color: #aaa; font-size: 0.88rem; }
+    .upload-text strong { color: #7c6fff; }
+    .filename {
+      margin-top: 10px;
+      font-size: 0.85rem;
+      color: #7c6fff;
+      font-weight: 600;
+      min-height: 1.2em;
+    }
+
+    /* モード選択 */
+    .mode-label {
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .mode-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+    .mode-btn {
+      padding: 14px 8px;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      background: #12122a;
+      color: #aaa;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+    .mode-btn:hover { border-color: #555; color: #ddd; }
+    .mode-btn.active {
+      border-color: #7c6fff;
+      background: rgba(124,111,255,0.12);
+      color: #fff;
+    }
+    .mode-btn .icon { font-size: 1.4rem; display: block; margin-bottom: 4px; }
+    .mode-btn .name { font-weight: 600; font-size: 0.88rem; }
+    .mode-btn .sub { font-size: 0.72rem; color: #666; }
+    .mode-btn.active .sub { color: #9d93ff; }
+
+    /* 変換ボタン */
+    .convert-btn {
+      width: 100%;
+      padding: 16px;
+      background: #7c6fff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.02em;
+    }
+    .convert-btn:hover:not(:disabled) { background: #9488ff; transform: translateY(-1px); }
+    .convert-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+    /* プログレス */
+    .progress-wrap {
+      margin-top: 20px;
+      display: none;
+    }
+    .progress-wrap.show { display: block; }
+    .progress-bar-bg {
+      background: #2a2a4a;
+      border-radius: 99px;
+      height: 8px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #7c6fff, #a78bfa);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+    .progress-text { font-size: 0.82rem; color: #888; text-align: center; }
+
+    /* ダウンロード */
+    .download-wrap {
+      margin-top: 20px;
+      display: none;
+    }
+    .download-wrap.show { display: block; }
+    .download-btn {
+      width: 100%;
+      padding: 14px;
+      background: transparent;
+      color: #4ade80;
+      border: 1px solid #4ade80;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .download-btn:hover { background: rgba(74,222,128,0.1); }
+
+    /* エラー */
+    .error-msg {
+      margin-top: 16px;
+      padding: 12px 16px;
+      background: rgba(239,68,68,0.1);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: 8px;
+      color: #f87171;
+      font-size: 0.85rem;
+      display: none;
+    }
+    .error-msg.show { display: block; }
+
+    footer {
+      margin-top: 24px;
+      text-align: center;
+      color: #444;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🎮 Chiptune Converter</h1>
+  <p class="subtitle">音楽ファイルをレトロゲーム風チップチューンに変換</p>
+
+  <div class="card">
+
+    <!-- アップロード -->
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".mp3,.wav,.ogg,.flac,.m4a,.aac">
+      <span class="upload-icon">🎵</span>
+      <div class="upload-text">
+        <strong>クリック</strong>またはドラッグ＆ドロップ<br>
+        MP3 / WAV / OGG / FLAC 対応（最大50MB）
+      </div>
+      <div class="filename" id="filename"></div>
+    </div>
+
+    <!-- モード選択 -->
+    <div class="mode-label">変換モードを選択</div>
+    <div class="mode-grid">
+      <button class="mode-btn active" data-mode="nes" onclick="setMode(this)">
+        <span class="icon">🔴</span>
+        <span class="name">NES</span>
+        <span class="sub">ファミコン</span>
+      </button>
+      <button class="mode-btn" data-mode="gb" onclick="setMode(this)">
+        <span class="icon">🟢</span>
+        <span class="name">GB</span>
+        <span class="sub">ゲームボーイ</span>
+      </button>
+      <button class="mode-btn" data-mode="snes" onclick="setMode(this)">
+        <span class="icon">🟣</span>
+        <span class="name">SNES</span>
+        <span class="sub">スーパーファミコン</span>
+      </button>
+    </div>
+
+    <!-- 変換ボタン -->
+    <button class="convert-btn" id="convertBtn" onclick="startConvert()" disabled>
+      変換する
+    </button>
+
+    <!-- プログレス -->
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar-bg">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="progress-text" id="progressText">変換中...</div>
+    </div>
+
+    <!-- ダウンロード -->
+    <div class="download-wrap" id="downloadWrap">
+      <button class="download-btn" id="downloadBtn">
+        ⬇ WAVをダウンロード
+      </button>
+    </div>
+
+    <!-- エラー -->
+    <div class="error-msg" id="errorMsg"></div>
+
+  </div>
+
+  <footer>
+    Powered by <a href="https://github.com/spotify/basic-pitch" style="color:#555;">basic-pitch</a> (Spotify) · Web Audio API
+  </footer>
+</div>
+
+<script>
+  let selectedFile = null;
+  let selectedMode = 'nes';
+  let pollTimer = null;
+
+  // ファイル選択
+  const zone = document.getElementById('uploadZone');
+  const input = document.getElementById('fileInput');
+
+  zone.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    if (input.files[0]) setFile(input.files[0]);
+  });
+  zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag'));
+  zone.addEventListener('drop', e => {
+    e.preventDefault();
+    zone.classList.remove('drag');
+    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  });
+
+  function setFile(file) {
+    selectedFile = file;
+    document.getElementById('filename').textContent = file.name;
+    document.getElementById('convertBtn').disabled = false;
+    hideAll();
+  }
+
+  function setMode(btn) {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMode = btn.dataset.mode;
+  }
+
+  function hideAll() {
+    document.getElementById('progressWrap').classList.remove('show');
+    document.getElementById('downloadWrap').classList.remove('show');
+    document.getElementById('errorMsg').classList.remove('show');
+  }
+
+  async function startConvert() {
+    if (!selectedFile) return;
+    hideAll();
+
+    const btn = document.getElementById('convertBtn');
+    btn.disabled = true;
+    btn.textContent = '変換中...';
+
+    document.getElementById('progressWrap').classList.add('show');
+    setProgress(5, 'ファイルをアップロード中...');
+
+    const form = new FormData();
+    form.append('file', selectedFile);
+    form.append('mode', selectedMode);
+
+    try {
+      const res = await fetch('/convert', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || '変換に失敗しました');
+
+      // ポーリング開始
+      pollStatus(data.job_id);
+
+    } catch(e) {
+      showError(e.message);
+      btn.disabled = false;
+      btn.textContent = '変換する';
+    }
+  }
+
+  function pollStatus(jobId) {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await fetch(`/status/${jobId}`);
+        const data = await res.json();
+
+        if (data.status === 'processing') {
+          const p = data.progress || 0;
+          const msg = p < 30 ? 'AIでピッチ検出中...' :
+                      p < 40 ? 'チャンネル割り当て中...' :
+                      p < 90 ? '波形合成中...' : 'マスタリング中...';
+          setProgress(p, msg);
+
+        } else if (data.status === 'done') {
+          clearInterval(pollTimer);
+          setProgress(100, '変換完了！');
+          setTimeout(() => showDownload(jobId), 400);
+          document.getElementById('convertBtn').disabled = false;
+          document.getElementById('convertBtn').textContent = '変換する';
+
+        } else if (data.status === 'error') {
+          clearInterval(pollTimer);
+          showError(data.message || 'エラーが発生しました');
+          document.getElementById('convertBtn').disabled = false;
+          document.getElementById('convertBtn').textContent = '変換する';
+        }
+      } catch(e) {
+        clearInterval(pollTimer);
+        showError('通信エラーが発生しました');
+      }
+    }, 1500);
+  }
+
+  function setProgress(pct, text) {
+    document.getElementById('progressBar').style.width = pct + '%';
+    document.getElementById('progressText').textContent = text || '';
+  }
+
+  function showDownload(jobId) {
+    document.getElementById('progressWrap').classList.remove('show');
+    const wrap = document.getElementById('downloadWrap');
+    wrap.classList.add('show');
+    const btn = document.getElementById('downloadBtn');
+    btn.onclick = () => { window.location.href = `/download/${jobId}`; };
+    wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function showError(msg) {
+    document.getElementById('progressWrap').classList.remove('show');
+    const el = document.getElementById('errorMsg');
+    el.textContent = '⚠ ' + msg;
+    el.classList.add('show');
+  }
+</script>
+</body>
+</html>
