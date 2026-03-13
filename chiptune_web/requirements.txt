@@ -1,8 +1,8 @@
-flask==3.0.3
-gunicorn==22.0.0
+flask
+gunicorn
+numpy==1.23.5
+scipy==1.10.1
 basic-pitch
-numpy==1.26.4
-scipy==1.13.0
-pretty_midi==0.2.10
-soundfile==0.12.1
-librosa==0.10.2
+pretty_midi
+soundfile
+librosa
