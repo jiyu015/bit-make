@@ -1,11 +1,12 @@
+import sys
 import os
-from flask import Flask, render_template
+from flask import Flask
 
+# appを定義
 app = Flask(__name__)
 
 @app.route('/')
 def index():
-    # テンプレートファイルを使わず、まずは表示を確認する
     return "<h1>Chiptune Converter is Online</h1>"
 
 if __name__ == '__main__':
