@@ -140,13 +140,26 @@ def midi_to_notes(midi_path):
                 'is_drum': instrument.is_drum,
             })
     notes.sort(key=lambda x: x['start'])
+
+    # --- ここから追加：短すぎる音符を補正する (Aの修正) ---
+    min_duration = 0.05  # 最低でも0.05秒は鳴らす
+    filtered_notes = []
+    
+    for n in notes:
+        # 音の長さを計算
+        if (n['end'] - n['start']) < min_duration:
+            # 短すぎる場合は後ろに少し伸ばす
+            n['end'] = n['start'] + min_duration
+        filtered_notes.append(n)
+    # -----------------------------------------------
+    
     return notes, pm.get_end_time()
 
 def assign_to_slots(notes, num_slots):
     slots = [[] for _ in range(num_slots)]
     busy_until = [0.0] * num_slots
     for note in sorted(notes, key=lambda x: x['start']):
-        free = [i for i in range(num_slots) if note['start'] >= busy_until[i] - 0.005]
+        free = [i for i in range(num_slots) if note['start'] >= busy_until[i] +0.01]
         idx = min(free, key=lambda i: busy_until[i]) if free else min(range(num_slots), key=lambda i: busy_until[i])
         slots[idx].append(note)
         busy_until[idx] = note['end']
@@ -182,15 +195,20 @@ def render_note(ch_name, note, mode, sr):
     if mode == 'nes':
         if ch_name == 'SQ1':
             w = generate_square(note['freq'], dur, sr, duty=0.50, amplitude=amp)
-            return apply_envelope(w, 0.005, 0.02, 0.7, 0.03, sr)
+            # 0.03 -> 0.01 に変更（スパッと切れるようにする）
+            return apply_envelope(w, 0.005, 0.02, 0.7, 0.01, sr)
         elif ch_name == 'SQ2':
             w = generate_square(note['freq'], dur, sr, duty=0.25, amplitude=amp)
-            return apply_envelope(w, 0.005, 0.02, 0.7, 0.03, sr)
+            # 0.03 -> 0.01 に変更
+            return apply_envelope(w, 0.005, 0.02, 0.7, 0.01, sr)
         elif ch_name == 'TRI':
-            return generate_triangle(note['freq'], dur, sr, amplitude=amp * 0.9)
+            # 三角波（ベース音）も、末尾を少しだけ削る処理を追加するとスッキリします
+            w = generate_triangle(note['freq'], dur, sr, amplitude=amp * 0.9)
+            return apply_envelope(w, 0.005, 0.01, 0.8, 0.01, sr)
         elif ch_name == 'NOISE':
             w = generate_nes_noise(dur, sr, amplitude=amp * 0.5)
-            return apply_envelope(w, 0.001, 0.05, 0.0, 0.05, sr)
+            # 0.05 -> 0.02 に変更（ドラムのキレを良くする）
+            return apply_envelope(w, 0.001, 0.05, 0.0, 0.02, sr)
 
     elif mode == 'gb':
         if ch_name in ('CH1', 'CH2'):
