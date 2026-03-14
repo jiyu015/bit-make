@@ -1,18 +1,23 @@
 import os
 import uuid
 import threading
-import shutil # 追加
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_from_directory, render_template
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024 
-# 公開用フォルダを作成（永続化）
-STORAGE_DIR = "downloads"
+
+# 永続的な保存ディレクトリを確実に作成
+STORAGE_DIR = os.path.join(os.getcwd(), 'downloads')
 if not os.path.exists(STORAGE_DIR):
     os.makedirs(STORAGE_DIR)
 
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# ジョブ管理
 jobs = {}
 
 def run_conversion(job_id, input_path, mode, output_path):
@@ -25,7 +30,7 @@ def run_conversion(job_id, input_path, mode, output_path):
     except Exception as e:
         jobs[job_id] = {'status': 'error', 'message': str(e)}
     finally:
-        # inputだけ消す（outputはダウンロードまで残す）
+        # 入力ファイルは変換後速やかに削除して容量を節約
         if os.path.exists(input_path):
             os.remove(input_path)
 
@@ -40,10 +45,17 @@ def convert_audio():
     file = request.files['file']
     mode = request.form.get('mode', 'nes')
     
+    if file.filename == '' or not allowed_file(file.filename):
+        return jsonify({'error': '不正なファイルです'}), 400
+
     job_id = str(uuid.uuid4())
-    # 修正：tempfileではなくSTORAGE_DIRを使用
-    input_path = os.path.join(STORAGE_DIR, f"{job_id}_in_{secure_filename(file.filename)}")
-    output_path = os.path.join(STORAGE_DIR, f"{job_id}_out.wav")
+    # job_id をファイル名に含めることで競合を回避
+    input_filename = f"{job_id}_{secure_filename(file.filename)}"
+    output_filename = f"{job_id}_out.wav"
+    
+    input_path = os.path.join(STORAGE_DIR, input_filename)
+    output_path = os.path.join(STORAGE_DIR, output_filename)
+    
     file.save(input_path)
 
     thread = threading.Thread(
@@ -55,13 +67,22 @@ def convert_audio():
 
     return jsonify({'job_id': job_id})
 
+@app.route('/status/<job_id>')
+def job_status(job_id):
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({'status': 'not_found'}), 404
+    return jsonify(job)
+
 @app.route('/download/<job_id>')
 def download(job_id):
-    # ファイル名からpathを復元
-    output_path = os.path.join(STORAGE_DIR, f"{job_id}_out.wav")
-    if not os.path.exists(output_path):
-        return jsonify({'error': 'ファイルがまだ作成されていないか、期限切れです'}), 404
-    return send_file(output_path, as_attachment=True, download_name='chiptune_output.wav')
+    filename = f"{job_id}_out.wav"
+    # ファイルが物理的に存在するか確認
+    if not os.path.exists(os.path.join(STORAGE_DIR, filename)):
+        return jsonify({'error': 'ファイルがまだ作成されていないか、存在しません'}), 404
+        
+    # send_from_directory で確実に配信
+    return send_from_directory(STORAGE_DIR, filename, as_attachment=True, download_name='chiptune_output.wav')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
