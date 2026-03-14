@@ -277,7 +277,16 @@ def convert(audio_path, mode, output_path, progress_callback=None):
                 wave = render_note(ch, note, mode, SAMPLE_RATE)
                 end_i = min(start_i + len(wave), total_samples)
                 wave = wave[:end_i - start_i]
-                mix[start_i:end_i] += wave * vol_map.get(ch, 0.3)
+                # 前の音と少しだけ重ねるクロスフェード処理
+                target_wave = wave * vol_map.get(ch, 0.3)
+                overlap = int(0.002 * SAMPLE_RATE) # 2ミリ秒だけ重ねる
+                
+                # 最初の方のサンプルを滑らかに足す
+                if start_i > 0:
+                    mix[start_i:start_i+overlap] += target_wave[:overlap] * np.linspace(0, 1, overlap)
+                    mix[start_i+overlap:end_i] += target_wave[overlap:]
+                else:
+                    mix[start_i:end_i] += target_wave
             cb(40 + int(50 * (ci + 1) / len(ch_names)))
 
         if mode == 'snes':
