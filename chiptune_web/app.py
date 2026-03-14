@@ -1,10 +1,12 @@
 import os
+import soundfile as sf
 from flask import Flask, request, send_file
+import converter
 
 app = Flask(__name__)
 
-# アップロードされたファイルを一時的にメモリで処理するための設定
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024 # 16MBまで
+# ファイルアップロードの制限（最大16MB）
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -16,12 +18,23 @@ def index():
         if file.filename == '':
             return "ファイルが選択されていません", 400
         
-        # ここで converter.py の関数を呼び出します
-        # 例: converted_data = converter.process(file.read())
+        # 一時ファイルとして保存して変換
+        input_path = os.path.join('/tmp', file.filename)
+        file.save(input_path)
         
-        return "変換成功（※現在は受け取りのみ実装中）"
+        try:
+            # 変換実行
+            wave, sr = converter.convert_to_chiptune(input_path)
+            
+            # 出力用ファイル作成
+            output_path = '/tmp/chiptune.wav'
+            sf.write(output_path, wave, sr)
+            
+            return send_file(output_path, as_attachment=True)
+        except Exception as e:
+            return f"変換中にエラーが発生しました: {str(e)}", 500
 
-    # HTMLフォームを返す
+    # フォームを表示
     return """
     <!DOCTYPE html>
     <html>
