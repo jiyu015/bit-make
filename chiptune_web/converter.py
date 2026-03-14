@@ -21,12 +21,18 @@ PSG_VOL_TABLE = np.array([
 def midi_to_freq(note):
     return 440.0 * (2.0 ** ((note - 69) / 12.0))
 
-def generate_square(freq, duration, sr, duty=0.5, amplitude=1.0):
+def generate_square(freq, duration, sr, duty=0.5, amplitude=1.0, vibrato=False):
     n = int(duration * sr)
     if n == 0 or freq <= 0:
         return np.zeros(n)
     t = np.arange(n) / sr
-    phase = (t * freq) % 1.0
+    
+    # なめらかさを出すためのビブラート（秒間6Hzでわずかに揺らす）
+    f_mod = freq
+    if vibrato:
+        f_mod = freq * (1.0 + 0.004 * np.sin(2 * np.pi * 6.0 * t))
+        
+    phase = np.cumsum(f_mod / sr) % 1.0
     return np.where(phase < duty, amplitude, -amplitude).astype(np.float32)
 
 def generate_triangle(freq, duration, sr, amplitude=1.0):
@@ -81,26 +87,19 @@ def generate_snes_brr(freq, duration, sr, amplitude=1.0):
     n = int(duration * sr)
     if n == 0 or freq <= 0:
         return np.zeros(n)
-    wave = generate_square(freq, duration, sr, duty=0.5, amplitude=amplitude)
+    # SNESにもビブラートを適用
+    wave = generate_square(freq, duration, sr, duty=0.5, amplitude=amplitude, vibrato=True)
     wave = np.round(wave * 8) / 8
     cutoff = min(freq * 3 / (sr / 2), 0.45)
     b, a = butter(2, cutoff, btype='low')
     wave = lfilter(b, a, wave).astype(np.float32)
-    # ADSR
-    attack_s, decay_s, sustain_l, release_s = 0.06, 0.10, 0.85, 0.09
-    ai, di, ri = int(attack_s*sr), int(decay_s*sr), int(release_s*sr)
-    env = np.ones(n)
-    env[:min(ai,n)] = np.linspace(0, 1, min(ai,n))
-    if ai < n:
-        env[ai:min(ai+di,n)] = np.linspace(1, sustain_l, min(di, n-ai))
-    if ai+di < n:
-        env[ai+di:max(0,n-ri)] = sustain_l
-    if n-ri > 0:
-        env[max(0,n-ri):] = np.linspace(sustain_l, 0, n-max(0,n-ri))
-    return (wave * env).astype(np.float32)
+    # なめらかめのADSR
+    attack_s, decay_s, sustain_l, release_s = 0.02, 0.08, 0.8, 0.05
+    return apply_envelope(wave, attack_s, decay_s, sustain_l, release_s, sr)
 
 def apply_envelope(wave, attack_s, decay_s, sustain_level, release_s, sr):
     n = len(wave)
+    if n == 0: return wave
     env = np.zeros(n)
     ai = int(attack_s * sr)
     di = int(decay_s * sr)
@@ -139,27 +138,22 @@ def midi_to_notes(midi_path):
                 'velocity': note.velocity,
                 'is_drum': instrument.is_drum,
             })
+    
+    # Aの修正：ソート後に短い音符を補正
     notes.sort(key=lambda x: x['start'])
-
-    # --- ここから追加：短すぎる音符を補正する (Aの修正) ---
-    min_duration = 0.05  # 最低でも0.05秒は鳴らす
-    filtered_notes = []
-    
+    min_duration = 0.05 
     for n in notes:
-        # 音の長さを計算
         if (n['end'] - n['start']) < min_duration:
-            # 短すぎる場合は後ろに少し伸ばす
             n['end'] = n['start'] + min_duration
-        filtered_notes.append(n)
-    # -----------------------------------------------
-    
+            
     return notes, pm.get_end_time()
 
 def assign_to_slots(notes, num_slots):
     slots = [[] for _ in range(num_slots)]
     busy_until = [0.0] * num_slots
     for note in sorted(notes, key=lambda x: x['start']):
-        free = [i for i in range(num_slots) if note['start'] >= busy_until[i] +0.01]
+        # Cの修正：わずかな隙間(+0.01)を空けて発音の重複を防ぐ
+        free = [i for i in range(num_slots) if note['start'] >= busy_until[i] + 0.01]
         idx = min(free, key=lambda i: busy_until[i]) if free else min(range(num_slots), key=lambda i: busy_until[i])
         slots[idx].append(note)
         busy_until[idx] = note['end']
@@ -194,32 +188,30 @@ def render_note(ch_name, note, mode, sr):
 
     if mode == 'nes':
         if ch_name == 'SQ1':
-            w = generate_square(note['freq'], dur, sr, duty=0.50, amplitude=amp)
-            # 0.03 -> 0.01 に変更（スパッと切れるようにする）
-            return apply_envelope(w, 0.005, 0.02, 0.7, 0.01, sr)
+            w = generate_square(note['freq'], dur, sr, duty=0.50, amplitude=amp, vibrato=True)
+            return apply_envelope(w, 0.01, 0.02, 0.7, 0.015, sr)
         elif ch_name == 'SQ2':
             w = generate_square(note['freq'], dur, sr, duty=0.25, amplitude=amp)
-            # 0.03 -> 0.01 に変更
-            return apply_envelope(w, 0.005, 0.02, 0.7, 0.01, sr)
+            return apply_envelope(w, 0.01, 0.02, 0.7, 0.015, sr)
         elif ch_name == 'TRI':
-            # 三角波（ベース音）も、末尾を少しだけ削る処理を追加するとスッキリします
             w = generate_triangle(note['freq'], dur, sr, amplitude=amp * 0.9)
-            return apply_envelope(w, 0.005, 0.01, 0.8, 0.01, sr)
+            return apply_envelope(w, 0.01, 0.01, 0.8, 0.02, sr)
         elif ch_name == 'NOISE':
             w = generate_nes_noise(dur, sr, amplitude=amp * 0.5)
-            # 0.05 -> 0.02 に変更（ドラムのキレを良くする）
             return apply_envelope(w, 0.001, 0.05, 0.0, 0.02, sr)
 
     elif mode == 'gb':
         if ch_name in ('CH1', 'CH2'):
             duty = 0.25 if ch_name == 'CH1' else 0.50
-            w = generate_square(note['freq'], dur, sr, duty=duty, amplitude=amp)
-            return apply_envelope(w, 0.003, 0.01, 0.75, 0.02, sr)
+            vibrate = True if ch_name == 'CH1' else False
+            w = generate_square(note['freq'], dur, sr, duty=duty, amplitude=amp, vibrato=vibrate)
+            return apply_envelope(w, 0.008, 0.01, 0.75, 0.015, sr)
         elif ch_name == 'CH3':
-            return generate_gb_wave(note['freq'], dur, sr, amplitude=amp * 0.85)
+            w = generate_gb_wave(note['freq'], dur, sr, amplitude=amp * 0.85)
+            return apply_envelope(w, 0.01, 0.01, 0.8, 0.02, sr)
         elif ch_name == 'CH4':
             w = generate_gb_noise(dur, sr, amplitude=amp * 0.45)
-            return apply_envelope(w, 0.001, 0.04, 0.0, 0.04, sr)
+            return apply_envelope(w, 0.001, 0.04, 0.0, 0.03, sr)
 
     elif mode == 'snes':
         if note.get('is_drum'):
@@ -240,7 +232,6 @@ def convert(audio_path, mode, output_path, progress_callback=None):
 
     cb(5)
 
-    # Step1: basic-pitch でMIDI変換
     with tempfile.TemporaryDirectory() as tmpdir:
         from basic_pitch.inference import predict_and_save
         from basic_pitch import ICASSP_2022_MODEL_PATH
@@ -261,7 +252,6 @@ def convert(audio_path, mode, output_path, progress_callback=None):
         )
         cb(30)
 
-        # MIDIファイルを探す
         midi_path = None
         for f in os.listdir(tmpdir):
             if f.endswith('.mid'):
@@ -270,12 +260,10 @@ def convert(audio_path, mode, output_path, progress_callback=None):
         if not midi_path:
             raise RuntimeError("MIDI変換に失敗しました")
 
-        # Step2: チャンネル割り当て
         notes, total_sec = midi_to_notes(midi_path)
         channels = assign_channels(notes, mode)
         cb(40)
 
-        # Step3: 波形合成
         if mode == 'nes':
             ch_names = ['SQ1', 'SQ2', 'TRI', 'NOISE']
             vol_map  = {'SQ1': 0.45, 'SQ2': 0.40, 'TRI': 0.35, 'NOISE': 0.30}
@@ -295,11 +283,10 @@ def convert(audio_path, mode, output_path, progress_callback=None):
                 wave = render_note(ch, note, mode, SAMPLE_RATE)
                 end_i = min(start_i + len(wave), total_samples)
                 wave = wave[:end_i - start_i]
-                # 前の音と少しだけ重ねるクロスフェード処理
-                target_wave = wave * vol_map.get(ch, 0.3)
-                overlap = int(0.002 * SAMPLE_RATE) # 2ミリ秒だけ重ねる
                 
-                # 最初の方のサンプルを滑らかに足す
+                target_wave = wave * vol_map.get(ch, 0.3)
+                overlap = int(0.002 * SAMPLE_RATE) 
+                
                 if start_i > 0:
                     mix[start_i:start_i+overlap] += target_wave[:overlap] * np.linspace(0, 1, overlap)
                     mix[start_i+overlap:end_i] += target_wave[overlap:]
@@ -315,7 +302,6 @@ def convert(audio_path, mode, output_path, progress_callback=None):
         elif mode == 'gb':
             mix = lowpass(mix, 8000, SAMPLE_RATE)
 
-        # マスタリング
         peak = np.max(np.abs(mix))
         if peak > 1e-6:
             mix = mix * (0.9 / peak)
