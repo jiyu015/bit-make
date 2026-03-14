@@ -1,53 +1,55 @@
 import os
 import soundfile as sf
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, render_template_string
 import converter
 
 app = Flask(__name__)
+UPLOAD_FOLDER = '/tmp'
 
-# ファイルアップロードの制限（最大16MB）
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# デザイン用のCSS
+CSS = """
+<style>
+    body { background: #222; color: #0f0; font-family: 'Courier New', monospace; padding: 50px; text-align: center; }
+    .container { background: #333; border: 2px solid #0f0; padding: 20px; border-radius: 10px; display: inline-block; }
+    select, input { background: #000; color: #0f0; border: 1px solid #0f0; padding: 10px; margin: 10px; }
+</style>
+"""
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
-        if 'file' not in request.files:
-            return "ファイルがありません", 400
-        
         file = request.files['file']
-        if file.filename == '':
-            return "ファイルが選択されていません", 400
+        mode = request.form['mode']
+        fmt = request.form['format']
         
-        # 一時ファイルとして保存して変換
-        input_path = os.path.join('/tmp', file.filename)
+        input_path = os.path.join(UPLOAD_FOLDER, file.filename)
         file.save(input_path)
         
-        try:
-            # 変換実行
-            wave, sr = converter.convert_to_chiptune(input_path)
-            
-            # 出力用ファイル作成
-            output_path = '/tmp/chiptune.wav'
-            sf.write(output_path, wave, sr)
-            
-            return send_file(output_path, as_attachment=True)
-        except Exception as e:
-            return f"変換中にエラーが発生しました: {str(e)}", 500
+        wave, sr = converter.convert_to_chiptune(input_path, mode)
+        output_path = os.path.join(UPLOAD_FOLDER, f'output.{fmt}')
+        sf.write(output_path, wave, sr)
+        
+        return send_file(output_path, as_attachment=True)
 
-    # フォームを表示
-    return """
-    <!DOCTYPE html>
-    <html>
-    <body>
-        <h1>Chiptune Converter</h1>
+    return f"""
+    {CSS}
+    <div class="container">
+        <h1>Chiptune Converter PRO</h1>
         <form method="post" enctype="multipart/form-data">
-            <input type="file" name="file" accept="audio/*">
+            <input type="file" name="file" accept="audio/*" required><br>
+            <select name="mode">
+                <option value="nes">ファミコン風 (8-bit)</option>
+                <option value="gb">ゲームボーイ風 (Low-bit)</option>
+                <option value="snes">スーファミ風 (16-bit)</option>
+            </select><br>
+            <select name="format">
+                <option value="wav">WAV形式</option>
+                <option value="flac">FLAC形式</option>
+            </select><br>
             <input type="submit" value="変換開始">
         </form>
-    </body>
-    </html>
+    </div>
     """
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
