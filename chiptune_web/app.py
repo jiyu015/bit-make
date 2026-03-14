@@ -2,73 +2,83 @@ import os
 import uuid
 import threading
 import io
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file
 
 app = Flask(__name__)
-# メモリ制限を考慮しつつ効率的に処理
-app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024 
-
-# ジョブ状態の保持
+# 変換ジョブを保持する辞書
 jobs = {}
 
-def process_audio_in_memory(job_id, file_data, mode):
-    """
-    メモリ空間内でのみ変換を行うパイプライン
-    """
+# 変換ロジックを非同期で実行するためのブリッジ関数
+def run_conversion_task(job_id, file_data, mode):
     try:
         jobs[job_id] = {'status': 'processing', 'progress': 0}
         
-        # converterの変換関数をインポート
+        # converter.pyの変換処理をインポート
         from converter import convert
         
-        # 一時的なメモリバッファとしてBytesIOを使用
+        # 実際には convert 関数を「メモリ上のデータを直接受け取り、メモリ上のデータを返す」ように
+        # 修正する必要がありますが、まずは基盤を安定させます。
+        # ここでメモリベースの変換を実行します。
         output_buffer = io.BytesIO()
         
-        # 変換ロジックへのパス（実際の実装に合わせ適宜調整）
-        # ※converter.pyがメモリを直接扱えるよう設計されているのが理想的
-        # ここでは簡易化のため、最終出力をメモリへ格納
-        # 実際には convert 関数に BytesIO を渡せるよう設計変更を推奨
+        # 変換実行 (ダミー実装: 実際はここを converter.convert に繋ぎます)
+        # 成功時にデータを bytes として格納
+        jobs[job_id] = {'status': 'done', 'data': b"dummy_wave_data"} 
         
-        # 変換実行後、output_buffer にデータを書き込む処理
-        # ... (変換ロジック) ...
-        
-        jobs[job_id] = {'status': 'done', 'data': output_buffer.getvalue()}
     except Exception as e:
         jobs[job_id] = {'status': 'error', 'message': str(e)}
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # ポーリング機能を内蔵したフロントエンド
+    return """
+    <!DOCTYPE html>
+    <head><title>Chiptune Converter</title></head>
+    <body>
+        <h2>Chiptune Converter (ver 2.0.0)</h2>
+        <input type="file" id="f">
+        <button id="b" onclick="u()">変換開始</button>
+        <p id="s">待機中...</p>
+        <script>
+            async function u() {
+                let d = new FormData(); d.append('file', document.getElementById('f').files[0]);
+                document.getElementById('s').innerText = '変換中...';
+                let r = await fetch('/convert', {method:'POST', body:d});
+                let j = await r.json();
+                poll(j.job_id);
+            }
+            async function poll(id) {
+                let r = await fetch('/status/'+id);
+                let d = await r.json();
+                if (d.status === 'done') { window.location.href = '/download/'+id; }
+                else if (d.status === 'error') { alert('エラー'); }
+                else { setTimeout(()=>poll(id), 2000); }
+            }
+        </script>
+    </body>
+    </html>
+    """
 
 @app.route('/convert', methods=['POST'])
 def convert_audio():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file uploaded'}), 400
-    
-    file = request.files['file']
+    file = request.files.get('file')
     mode = request.form.get('mode', 'nes')
+    if not file: return jsonify({'error': 'No file'}), 400
+    
     job_id = str(uuid.uuid4())
-    
-    # データをメモリに読み込む
-    file_data = file.read()
-    
-    # スレッドで非同期処理
-    threading.Thread(target=process_audio_in_memory, args=(job_id, file_data, mode)).start()
-    
+    threading.Thread(target=run_conversion_task, args=(job_id, file.read(), mode)).start()
     return jsonify({'job_id': job_id})
+
+@app.route('/status/<job_id>')
+def job_status(job_id):
+    return jsonify(jobs.get(job_id, {'status': 'not_found'}))
 
 @app.route('/download/<job_id>')
 def download(job_id):
     job = jobs.get(job_id)
-    if not job or job['status'] != 'done':
-        return jsonify({'error': 'Processing or not found'}), 404
-        
-    return send_file(
-        io.BytesIO(job['data']),
-        mimetype='audio/wav',
-        as_attachment=True,
-        download_name='chiptune_output.wav'
-    )
+    if job and job['status'] == 'done':
+        return send_file(io.BytesIO(job['data']), mimetype='audio/wav', as_attachment=True, download_name='out.wav')
+    return "Not ready", 404
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(host='0.0.0.0', port=5000)
