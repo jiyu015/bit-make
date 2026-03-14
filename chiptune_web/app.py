@@ -1,8 +1,13 @@
-def apply_quality_mastering(wave, sr):
-    # 物理的な歪みを抑えるためのソフトクリッピング
-    return np.tanh(wave * 0.95)
+import os
+from flask import Flask, render_template
 
-def render_note_high_quality(freq, duration, sr):
-    # 高解像度生成（オーバーサンプリングの概念）
-    # ... 波形生成後 ...
-    return apply_quality_mastering(wave, sr)
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    # テンプレートファイルを使わず、まずは表示を確認する
+    return "<h1>Chiptune Converter is Online</h1>"
+
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
