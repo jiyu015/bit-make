@@ -1,15 +1,15 @@
 import numpy as np
 import librosa
 
-def convert_to_chiptune(file_path):
-    # 1. 音声を読み込み、モノラルに変換
+def convert_to_chiptune(file_path, mode):
     y, sr = librosa.load(file_path, sr=22050, mono=True)
     
-    # 2. 矩形波（チップチューン）への変換
-    # 振幅が0より大きければ1.0、小さければ-1.0にする
-    chiptune_wave = np.where(y > 0, 1.0, -1.0)
-    
-    # 3. ソフトクリッピング（過度なデジタル歪みを抑える）
-    chiptune_wave = np.tanh(chiptune_wave * 0.95)
-    
-    return chiptune_wave, sr
+    # モードに応じたビット深度/解像度調整
+    if mode == 'nes': # ファミコン風 (鋭い矩形波)
+        y = np.where(y > 0, 1.0, -1.0)
+    elif mode == 'gb': # ゲームボーイ風 (少し丸みを帯びた波)
+        y = np.sign(y) * np.abs(y)**0.5
+    else: # スーファミ風 (16bit風の粗い量子化)
+        y = np.round(y * 16) / 16
+        
+    return y, sr
